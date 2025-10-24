@@ -1,33 +1,40 @@
-# Use uma imagem base Python slim (menor e mais rápida)
+# Use a imagem base Python slim
 FROM python:3.11-slim
 
-# Instalação de dependências do sistema necessárias (opcional, mas bom ter para libs como 'cryptography')
-# RUN apt-get update && apt-get install -y --no-install-recommends \
-#     build-essential \
-#     && rm -rf /var/lib/apt/lists/*
-
-# Instalação do Cloud Custodian (c7n) e pacotes AWS/Multi-Cloud
-# É crucial incluir os pacotes do(s) provedor(es) que você utilizará (aws, azure, gcp)
+# Instalação de dependências do sistema e Cloud Custodian
+# Adicione ferramentas de CLI multi-cloud se necessário, ou garanta que o CodeBuild as inclua.
+# Exemplo de instalação básica do Custodian:
 RUN pip install --no-cache-dir \
     cloud-custodian \
     c7n-aws \
-    c7n-org \
-    boto3
+    c7n-azure \
+    c7n-gcp \
+    boto3 \
+    # Adicione pandas ou outras libs para CSV/HTML se for fazer o post-processamento no Python
+    pandas
 
 # Diretório de trabalho dentro do container
 WORKDIR /var/task
 
-# Copia o código da sua Lambda (por exemplo, lambda_handler.py) e os arquivos de política (.yml)
-# O Cloud Custodian policies (.yml) deve estar disponível para o script Python da Lambda.
-COPY lambda_handler.py .
-# Exemplo de política:
-# COPY policies/ .
+# Copia os scripts de execução
+COPY entrypoint.sh .
+COPY run-remediation.sh .
+RUN chmod +x entrypoint.sh run-remediation.sh
 
-# Opcional: Define variáveis de ambiente úteis
-ENV CUSTODIAN_CACHE_DIR /tmp/c7n-cache
+# Copia o manipulador Python do Lambda (Onde a orquestração e chamada shell acontece)
+COPY lambda_function.py .
 
-# Comando de entrada (Entrypoint) para o AWS Lambda. 
-# A AWS já tem um Runtime padrão para Python, mas se a imagem for o destino final, 
-# você pode definir o ENTRYPOINT e o CMD.
-# Para imagem de container Lambda, o CMD deve apontar para o handler: [arquivo.função]
-CMD ["lambda_handler.handler"]
+# Copia os diretórios de políticas Custodian para um caminho fixo
+COPY policies/ /custodian/policies/
+
+# Define o ENTRYPOINT. 
+# Para o runtime customizado em imagem de container Lambda, o ENTRYPOINT é o que inicia o ambiente.
+# Este é o ponto de entrada principal do seu container.
+ENTRYPOINT ["./entrypoint.sh"]
+
+# O CMD é o que o ENTRYPOINT executa, geralmente o handler do Lambda.
+# O ENTRYPOINT.sh chamará esse CMD, se configurado. Para Lambda, o formato é [arquivo.função]
+# Mas como você está usando um shell script para orquestração, vamos manter o CMD do Python.
+CMD ["lambda_function.py"] 
+# Nota: A AWS Lambda irá sobrescrever isso se o seu ENTRYPOINT não o usar explicitamente.
+# Para este cenário, o ENTRYPOINT.sh será o ponto de partida.
