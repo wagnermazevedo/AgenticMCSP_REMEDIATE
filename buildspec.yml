@@ -1,0 +1,43 @@
+version: 0.2
+
+# Variáveis que serão utilizadas no build (Baseado no seu ECR)
+env:
+  variables:
+    AWS_REGION: "us-east-1"
+    ECR_REPOSITORY_URI: "057959860487.dkr.ecr.us-east-1.amazonaws.com/agenticmcsp-repo"
+    IMAGE_TAG: "remediate-latest-$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | head -c 8)"
+    IMAGE_NAME: "agenticmcsp-remediate"
+
+phases:
+  pre_build:
+    commands:
+      # 1. Login no ECR
+      - echo "Logging in to Amazon ECR..."
+      - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REPOSITORY_URI
+
+      # 2. Define o nome final da imagem com o repositório ECR
+      - REPOSITORY_AND_IMAGE="$ECR_REPOSITORY_URI:$IMAGE_NAME"
+
+  build:
+    commands:
+      # 1. Constrói a imagem Docker a partir do Dockerfile na raiz do repositório
+      - echo "Building the Docker image: ${REPOSITORY_AND_IMAGE}"
+      - docker build -t $REPOSITORY_AND_IMAGE .
+      # Tag adicional com a versão do commit (opcional, mas recomendado)
+      - docker tag $REPOSITORY_AND_IMAGE:latest $REPOSITORY_AND_IMAGE:$IMAGE_TAG
+
+  post_build:
+    commands:
+      # 1. Envia a imagem para o ECR
+      - echo "Pushing the Docker image to ECR..."
+      - docker push $REPOSITORY_AND_IMAGE:latest
+      - docker push $REPOSITORY_AND_IMAGE:$IMAGE_TAG
+
+      # 2. Cria um arquivo de definição de imagem (necessário para pipelines de deployment, se houver)
+      - printf '[{"name":"%s","imageUri":"%s"}]' "$IMAGE_NAME" "$REPOSITORY_AND_IMAGE:$IMAGE_TAG" > imagedefinitions.json
+      - cat imagedefinitions.json
+
+artifacts:
+  files:
+    # Este artefato é útil se você usar CodePipeline ou outras ferramentas de deploy
+    - imagedefinitions.json
